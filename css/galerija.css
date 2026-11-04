@@ -2575,3 +2575,44 @@ html.galerija-uronjena .galerija[style*="--vidljivo-v"] {
     line-height: 1.4;
   }
 }
+
+/* Ivica do ivice (viewport-fit=cover samo u galeriji preko ekrana):
+   dugmad i listovi se odmiču od izreza kamere i trake za početni ekran */
+html.galerija-uronjena .galerija-mob__vrh,
+html.galerija-uronjena .galerija-mob__dno {
+  padding-left: max(var(--s-3), env(safe-area-inset-left, 0px));
+  padding-right: max(var(--s-3), env(safe-area-inset-right, 0px));
+}
+html.galerija-uronjena .galerija-mob__vrh { padding-top: max(var(--s-3), env(safe-area-inset-top, 0px)); }
+@media (orientation: landscape) and (max-height: 500px) {
+  html.galerija-uronjena .galerija-mob__vrh {
+    padding-top: max(var(--s-2), env(safe-area-inset-top, 0px));
+    padding-left: max(var(--s-3), env(safe-area-inset-left, 0px));
+    padding-right: max(var(--s-3), env(safe-area-inset-right, 0px));
+  }
+  html.galerija-uronjena .galerija-mob__dno {
+    padding-left: max(var(--s-3), env(safe-area-inset-left, 0px));
+    padding-right: max(var(--s-3), env(safe-area-inset-right, 0px));
+    padding-bottom: max(var(--s-2), env(safe-area-inset-bottom, 0px));
+  }
+  html.galerija-uronjena .galerija[data-stanje] .galerija-panel,
+  html.galerija-uronjena .galerija[data-stanje="soba"] .galerija-alati {
+    border-right: env(safe-area-inset-right, 0px) solid transparent;
+  }
+}
+
+/* Položen telefon, otvorene Opcije: kadar se smanji u slobodni lijevi
+   dio, slika ostaje cijela i u sredini; zatvaranjem se vraća (sidro
+   lijevo je stalno, pa se ne pomjera dok se kadar vraća) */
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  html.galerija-uronjena .galerija-platno { transform-origin: 0 50%; }
+  html.galerija-uronjena .galerija[data-stanje][data-izabrano][data-opcije] .galerija-platno,
+  html.galerija-uronjena .galerija[data-stanje][data-opcije] .galerija-platno {
+    transform-origin: 0 50%;
+    transform: scale(var(--opcije-skala, 0.45));
+  }
+}
+
+/* Dodir na salu na mapi vodi u nju */
+.galerija-mapa__pod[data-mapa-sala],
+.galerija-mapa__sala[data-mapa-sala] { cursor: pointer; }
