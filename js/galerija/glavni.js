@@ -18,7 +18,7 @@ const {
 } = G;
 const { EN, IT, TEKST } = G;   /* tekstovi, osnova.js */
 const { SVJ, zagrijNaEkranu, SVJETLA_U_KADRU, osvjeziSjenke } = G;   /* svjetla, scena.js */
-const { zatvoriBitmapu, jedanPosaoKadra, paziNaDrugu } = G;   /* teksture, scena.js */
+const { zatvoriBitmapu, jedanPosaoKadra, paziNaDrugu, izvorMali, izvorDjela, AVIF_PROVJERA } = G;   /* teksture, scena.js */
 const { MJESTA_VELIKE, napraviSobu, postaviDjela, zamrzniNepokretno } = G;   /* scena.js */
 /* telefon, sucelje.js */
 const {
@@ -472,6 +472,7 @@ function petlja() {
    Izlaz — rušenje scene i oslobađanje WebGL konteksta
    --------------------------------------------------------- */
 function izadji() {
+  potpisStani();
   S.gen++;              /* poslovi iz reda za ovu salu se više ne izvršavaju */
   S.red.length = 0;
   S.teksture = [];
@@ -555,6 +556,166 @@ function izadji() {
 }
 
 /* ---------------------------------------------------------
+   PREDUČITAVANJE U POZADINI
+
+   Dok posjetilac čita stranicu, sala se tiho priprema: Three.js
+   (modulepreload), data/radovi.json i slike PRVE sale (sićušne,
+   prave, pa reljef poteza), plus teksture zidova, poda i plafona. Sve ide u keš
+   pregledača sa niskim prioritetom, kad se stranica smiri — pa je klik
+   na „Uđi u salu“ praktično trenutan, a slike su već na platnima.
+   Ne pokreće se uz „štedi podatke“ ili 2G (tada tek kad posjetilac
+   krene ka dugmetu), ni bez WebGL-a.
+   --------------------------------------------------------- */
+const SOBA_MAPE = ['zid-albedo', 'zid-normal', 'zid-roughness', 'pod-albedo', 'pod-normal', 'pod-roughness',
+  'plafon-albedo', 'plafon-normal'];
+function predSliku(url, cors, gotovo) {
+  if (!url) { if (gotovo) { gotovo(); } return; }
+  const i = new Image();
+  if (gotovo) { i.onload = i.onerror = gotovo; }
+  /* Isti način kao kasnije u sali (TextureLoader traži CORS, rasterizuj
+     ne), da pregledač uzme istu kopiju iz keša. */
+  if (cors) { i.crossOrigin = 'anonymous'; }
+  try { /** @type {any} */ (i).fetchPriority = 'low'; } catch (e) { /* stari pregledač */ }
+  i.decoding = 'async';
+  i.src = url;
+}
+function predUcitaj() {
+  if (S.predUcitano) { return; }
+  S.predUcitano = true;
+  najaviThree();
+  const p = ucitajPodatke();
+  S.podaciRano = p;
+  p.then(function (djela) {
+    SOBA_MAPE.forEach(function (ime) { predSliku(izKorijena('img/soba/' + ime + '.webp'), true); });
+    const prva = djela.slice(0, S.uMaloj || 0);
+    prva.forEach(function (d) { predSliku(izvorMali(d), false); });
+    /* Prave slike tek kad se zna radi li AVIF (izvorDjela bira format) */
+    AVIF_PROVJERA.then(function () {
+      /* Reljef poteza (normal mape, ~250 KB) tek kad stignu sve slike —
+         ne smije im oduzimati vezu. Crteži reljef nemaju. */
+      let ostalo = prva.length;
+      const reljef = function () {
+        if (--ostalo) { return; }
+        const kraj = TELEFON ? '-512.webp' : '.webp';
+        prva.forEach(function (d) {
+          if (d.id && d.kategorija !== 'crtezi') {
+            predSliku(izKorijena('img/reljef/' + encodeURIComponent(d.id) + kraj), true);
+          }
+        });
+      };
+      prva.forEach(function (d) { predSliku(izvorDjela(d), false, reljef); });
+    });
+  }, function () { /* greška se pokazuje tek na klik (ulaz) */ });
+}
+function predUcitajKadTreba() {
+  if (!korijen || !imaWebGL() || location.protocol === 'file:') { return; }
+  const d = el.pokreni;
+  /* Posjetilac krene ka dugmetu — odmah, bez čekanja */
+  if (d) {
+    ['pointerenter', 'focus', 'touchstart'].forEach(function (tip) {
+      d.addEventListener(tip, predUcitaj, { once: true, passive: true });
+    });
+  }
+  const veza = /** @type {any} */ (navigator).connection;
+  if (stediPodatke() || (veza && /(^|-)2g$/.test(veza.effectiveType || ''))) { return; }
+  const kreni = function () {
+    if (window.requestIdleCallback) { window.requestIdleCallback(predUcitaj, { timeout: 2500 }); }
+    else { window.setTimeout(predUcitaj, 300); }
+  };
+  if (document.readyState === 'complete') { kreni(); }
+  else { window.addEventListener('load', kreni, { once: true }); }
+}
+
+/* ---------------------------------------------------------
+   POTPIS — Markov potpis se ispisuje dok se sala priprema
+
+   Zastor se pokaže tek ako čekanje potraje duže od POTPIS_PRAG (kad je
+   sala već u kešu, ulazi se bez treptaja). Pero ide slovo po slovo,
+   ujednačenom brzinom, sa kratkim zastojem gdje se pero podiže. Ako je
+   sala spremna usred pisanja, ostatak se dopiše ubrzano (najviše
+   POTPIS_DOVRSI ms) — potpis nikad ne ostane prekinut na pola slova —
+   pa se zastor pretopi u salu. Ako čekanje traje duže od pisanja,
+   potpis se pretopi u punu sliku i blago „diše“ (CSS).
+   Uz smanjeno kretanje potpis stoji cijeli (CSS), bez pera.
+   --------------------------------------------------------- */
+const POTPIS_PRAG = 300;      /* ms do pojave zastora */
+const POTPIS_BRZINA = 0.5;    /* px putanje po ms — ~1,5 s za cijeli potpis */
+const POTPIS_DOVRSI = 200;    /* ms za dopisivanje kad je sala spremna */
+const POT = { tajmer: 0, anim: /** @type {Animation[]} */ ([]), vidljiv: false };
+const potpisPera = el.ucitavanje ? Array.prototype.slice.call(el.ucitavanje.querySelectorAll('.galerija-potpis-pero path')) : [];
+
+function potpisPisi() {
+  POT.anim = [];
+  if (!potpisPera.length || smanjenoKretanje() || !potpisPera[0].animate) {
+    el.ucitavanje.setAttribute('data-potpis', 'gotov');
+    return;
+  }
+  el.ucitavanje.removeAttribute('data-potpis');
+  let t = 0, slovo = null;
+  potpisPera.forEach(function (p) {
+    const duz = (p.getTotalLength && p.getTotalLength()) || 60;
+    if (slovo !== null) { t += p.getAttribute('data-slovo') === slovo ? 40 : 90; }   /* pero se podiže */
+    slovo = p.getAttribute('data-slovo');
+    const trajanje = Math.max(90, duz / POTPIS_BRZINA);
+    /* Početak malo prije putanje: okrugli vrh pera (r = 13) ne smije
+       ostaviti tačku dok slovo ne krene. */
+    const od = 1 + 14 / duz;
+    POT.anim.push(p.animate([{ strokeDashoffset: od }, { strokeDashoffset: 0 }], {
+      duration: trajanje, delay: t, easing: 'cubic-bezier(.4, .05, .5, .95)', fill: 'both'
+    }));
+    t += trajanje;
+  });
+  Promise.all(POT.anim.map(function (a) { return a.finished; })).then(function () {
+    if (POT.vidljiv) { el.ucitavanje.setAttribute('data-potpis', 'gotov'); }
+  }, function () { /* otkazano (izlaz) */ });
+}
+
+/* Klik na ulaz: zastor tek posle praga */
+function potpisKreni() {
+  potpisStani();
+  if (!el.ucitavanje) { return; }
+  POT.tajmer = window.setTimeout(function () {
+    POT.tajmer = 0;
+    POT.vidljiv = true;
+    korijen.setAttribute('data-ucitavanje-vidljivo', '');
+    potpisPisi();
+  }, POTPIS_PRAG);
+}
+
+/* Sala je spremna: dopiši ubrzano ako treba. Vraća Promise kad je
+   potpis cio (odmah, ako zastor nije ni bio vidljiv). */
+function potpisDovrsi() {
+  if (POT.tajmer) { window.clearTimeout(POT.tajmer); POT.tajmer = 0; }
+  if (!POT.vidljiv || !POT.anim.length) { return Promise.resolve(); }
+  let ostalo = 0;
+  POT.anim.forEach(function (a) {
+    const tm = a.effect && a.effect.getComputedTiming ? a.effect.getComputedTiming() : null;
+    const kraj = tm ? Number(tm.endTime) || 0 : 0;
+    ostalo = Math.max(ostalo, kraj - (Number(a.currentTime) || 0));
+  });
+  if (ostalo > POTPIS_DOVRSI) {
+    const brze = ostalo / POTPIS_DOVRSI;
+    POT.anim.forEach(function (a) { a.playbackRate = brze; });
+  }
+  return Promise.all(POT.anim.map(function (a) { return a.finished; })).then(function () {}, function () {});
+}
+
+/* Zastor se povlači (CSS pretapanje) */
+function potpisSkloni() {
+  if (POT.tajmer) { window.clearTimeout(POT.tajmer); POT.tajmer = 0; }
+  POT.vidljiv = false;
+  korijen.removeAttribute('data-ucitavanje-vidljivo');
+}
+
+/* Izlaz ili 2D: sve nazad na početak */
+function potpisStani() {
+  potpisSkloni();
+  POT.anim.forEach(function (a) { try { a.cancel(); } catch (e) { /* nebitno */ } });
+  POT.anim = [];
+  if (el.ucitavanje) { el.ucitavanje.removeAttribute('data-potpis'); }
+}
+
+/* ---------------------------------------------------------
    Klik na "Uđi u salu"
    --------------------------------------------------------- */
 async function ulaz() {
@@ -562,16 +723,23 @@ async function ulaz() {
   if (location.protocol === 'file:') { na2D('fajl'); return; }
 
   stanje('ucitavanje');
+  potpisKreni();
 
   /* Three.js i podaci se preuzimaju ISTOVREMENO, ne jedno za drugim */
   najaviThree();
   const obecanjeThree = ucitajThree();
   obecanjeThree.catch(function () { /* obrađuje se ispod */ });
 
+  /* Podaci iz pozadinskog predučitavanja, ako su već tu (samo jednom —
+     ponovni ulazak čita svježe). Ako je ono palo, pokušava se iznova. */
+  const rano = S.podaciRano;
+  S.podaciRano = null;
+  S.predUcitano = true;
   let djela;
   try {
-    djela = await ucitajPodatke();
+    djela = rano ? await rano.catch(function () { return ucitajPodatke(); }) : await ucitajPodatke();
   } catch (g) {
+    potpisStani();
     na2D((g && g.vrsta) || 'podaci');
     return;
   }
@@ -584,14 +752,21 @@ async function ulaz() {
     /* Three.js nije stigao iz vendor/three/ (nema veze, blokiran) ili je
        nepotpun. Razlog se i dalje zove 'cdn' — tako ga čitaju CSS i
        galerija.html (data-razlog). */
+    potpisStani();
     na2D('cdn');
     return;
   }
 
   S.tri = modul;
+  /* Potpis se dopiše (najviše POTPIS_DOVRSI ms) prije gradnje sale:
+     gradnja zauzme glavnu nit, pa bi pero inače stalo usred slova. */
+  await potpisDovrsi();
   try {
     pokreni(djela);
+    /* Zastor se povlači tek kad sala nacrta prvi kadar */
+    window.requestAnimationFrame(function () { window.requestAnimationFrame(potpisSkloni); });
   } catch (g) {
+    potpisStani();
     /* Ako crtanje padne, ne ostavljamo prazan crni pravougaonik.
        Pokupi za sobom sve što je stiglo da se napravi. */
     try { izadji(); } catch (e) { /* nebitno */ }
@@ -632,6 +807,7 @@ if (korijen) {
       ukras.addEventListener('click', function () { el.pokreni.click(); });
     }
     najaviKadTreba();
+    predUcitajKadTreba();
     /* „Uđi u galeriju“ sa početne (galerija.html?ulaz) ulazi odmah u
        salu, bez drugog klika. Parametar se briše iz adrese, pa
        osvježavanje stranice opet prikazuje običan ulaz. */
