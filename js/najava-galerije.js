@@ -126,7 +126,9 @@
 
   var teskiKrenuo = false;
   function teski() {
-    if (teskiKrenuo || STEDI) { return; }
+    /* TELEFON: bez teškog dijela (~3,3 MB slika) — na slabijim telefonima
+       je gušio vezu i memoriju; sala ih učitava sama kad se uđe. */
+    if (teskiKrenuo || STEDI || TELEFON) { return; }
     teskiKrenuo = true;
     Promise.all([laki(), AVIF]).then(function (x) {
       var p = x[0], avif = x[1];

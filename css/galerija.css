@@ -449,18 +449,10 @@ html[data-js] .galerija:not([data-stanje]) .galerija-scena { display: block; }
   overflow: visible;
 }
 
-/* Pero: na početku ništa nije ispisano (crtica je van putanje) */
-.galerija-potpis-pero path {
-  stroke-dasharray: 1 3;
-  stroke-dashoffset: 2;
-}
+/* Potpis se otkriva isječkom (glavni.js, clip-path na <svg>); maska sa
+   tragom pera se ne koristi — iPhone je nije iscrtavao (crna pozadina). */
+.galerija-potpis-slika:not(.galerija-potpis-slika--puna) { display: none; }
 
-.galerija-potpis-slika--puna {
-  opacity: 0;
-  transition: opacity 260ms ease;
-}
-
-.galerija-ucitavanje[data-potpis="gotov"] .galerija-potpis-slika--puna { opacity: 1; }
 .galerija-ucitavanje[data-potpis="gotov"] .galerija-ucitavanje__potpis {
   animation: galerija-disanje 2.8s ease-in-out 700ms infinite;
 }
@@ -480,8 +472,6 @@ html[data-js] .galerija:not([data-stanje]) .galerija-scena { display: block; }
 
 /* Smanjeno kretanje: potpis stoji cijeli, bez pera i bez disanja */
 @media (prefers-reduced-motion: reduce) {
-  .galerija-potpis-pero path { stroke-dashoffset: 0; }
-  .galerija-potpis-slika--puna { opacity: 1; transition: none; }
   .galerija-ucitavanje[data-potpis="gotov"] .galerija-ucitavanje__potpis { animation: none; }
   .galerija-ucitavanje { transition: none; }
 }

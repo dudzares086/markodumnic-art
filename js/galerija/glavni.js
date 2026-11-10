@@ -585,6 +585,10 @@ function predUcitaj() {
   najaviThree();
   const p = ucitajPodatke();
   S.podaciRano = p;
+  /* TELEFON: samo Three.js i podaci. Slike i teksture u pozadini su na
+     slabijim telefonima (Samsung A20, Honor) gušile vezu i memoriju baš
+     dok se sala gradi — sala ih ionako učitava sama, redom. */
+  if (TELEFON) { return; }
   p.then(function (djela) {
     SOBA_MAPE.forEach(function (ime) { predSliku(izKorijena('img/soba/' + ime + '.webp'), true); });
     const prva = djela.slice(0, S.uMaloj || 0);
@@ -639,32 +643,27 @@ function predUcitajKadTreba() {
    Uz smanjeno kretanje potpis stoji cijeli (CSS), bez pera.
    --------------------------------------------------------- */
 const POTPIS_PRAG = 300;      /* ms do pojave zastora */
-const POTPIS_BRZINA = 0.5;    /* px putanje po ms — ~1,5 s za cijeli potpis */
+const POTPIS_TRAJANJE = 1500; /* ms za cijeli potpis */
 const POTPIS_DOVRSI = 200;    /* ms za dopisivanje kad je sala spremna */
 const POT = { tajmer: 0, anim: /** @type {Animation[]} */ ([]), vidljiv: false };
-const potpisPera = el.ucitavanje ? Array.prototype.slice.call(el.ucitavanje.querySelectorAll('.galerija-potpis-pero path')) : [];
+const potpisSvg = el.ucitavanje ? el.ucitavanje.querySelector('.galerija-ucitavanje__potpis') : null;
 
+/* Potpis se otkriva s lijeva na desno (clip-path na cijelom <svg>).
+   Ranije: animirana SVG maska (trag pera) — WebKit (iPhone) masku ne
+   iscrtava iznova dok se animira, pa je ostajala samo crna pozadina, a
+   na slabijim Androidima svaki kadar maske je bio skup. Otkrivanje
+   isječkom radi svuda i jeftino je. */
 function potpisPisi() {
   POT.anim = [];
-  if (!potpisPera.length || smanjenoKretanje() || !potpisPera[0].animate) {
+  if (!potpisSvg || smanjenoKretanje() || !potpisSvg.animate) {
     el.ucitavanje.setAttribute('data-potpis', 'gotov');
     return;
   }
   el.ucitavanje.removeAttribute('data-potpis');
-  let t = 0, slovo = null;
-  potpisPera.forEach(function (p) {
-    const duz = (p.getTotalLength && p.getTotalLength()) || 60;
-    if (slovo !== null) { t += p.getAttribute('data-slovo') === slovo ? 40 : 90; }   /* pero se podiže */
-    slovo = p.getAttribute('data-slovo');
-    const trajanje = Math.max(90, duz / POTPIS_BRZINA);
-    /* Početak malo prije putanje: okrugli vrh pera (r = 13) ne smije
-       ostaviti tačku dok slovo ne krene. */
-    const od = 1 + 14 / duz;
-    POT.anim.push(p.animate([{ strokeDashoffset: od }, { strokeDashoffset: 0 }], {
-      duration: trajanje, delay: t, easing: 'cubic-bezier(.4, .05, .5, .95)', fill: 'both'
-    }));
-    t += trajanje;
-  });
+  POT.anim.push(potpisSvg.animate(
+    [{ clipPath: 'inset(0 100% 0 0)' }, { clipPath: 'inset(0 0 0 0)' }],
+    { duration: POTPIS_TRAJANJE, easing: 'cubic-bezier(.4, .05, .5, .95)', fill: 'both' }
+  ));
   Promise.all(POT.anim.map(function (a) { return a.finished; })).then(function () {
     if (POT.vidljiv) { el.ucitavanje.setAttribute('data-potpis', 'gotov'); }
   }, function () { /* otkazano (izlaz) */ });
